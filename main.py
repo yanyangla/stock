@@ -135,8 +135,9 @@ def _inline_format(text: str) -> str:
 class USStockAdvancedSkill:
     """美股自选股深度诊断引擎"""
 
-    def __init__(self, polygon_api_key: str, llm_api_key: str, llm_base_url: str = "https://api.openai.com/v1"):
+    def __init__(self, polygon_api_key: str, llm_api_key: str, llm_base_url: str = "https://open.bigmodel.cn/api/paas/v4/", llm_model: str = "glm-4-flash"):
         self.polygon_key = polygon_api_key
+        self.llm_model = llm_model
         self.ai_client = OpenAI(api_key=llm_api_key, base_url=llm_base_url)
         self.pure_sources = [
             "Bloomberg", "Reuters", "Wall Street Journal", "Dow Jones",
@@ -354,7 +355,7 @@ class USStockAdvancedSkill:
 
         try:
             response = self.ai_client.chat.completions.create(
-                model="gpt-4o",
+                model=self.llm_model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.1,
                 max_tokens=1200
@@ -369,7 +370,7 @@ class USStockAdvancedSkill:
 
 **报告时间**: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 **自选股池**: 共 {len(watchlist)} 只
-**数据源**: Polygon.io（技术面/新闻） + OpenAI GPT-4o（策略生成）
+**数据源**: Polygon.io（技术面/新闻） + 智谱AI GLM-4（策略生成）
 
 ---
 
@@ -453,6 +454,8 @@ def main():
     # ========== 1. 从环境变量读取配置 ==========
     POLYGON_API_KEY = os.getenv("POLYGON_API_KEY")
     LLM_API_KEY = os.getenv("LLM_API_KEY")
+    LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://open.bigmodel.cn/api/paas/v4/")
+    LLM_MODEL = os.getenv("LLM_MODEL", "glm-4-flash")
     SENDER_EMAIL = os.getenv("SENDER_EMAIL")
     EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")
 
@@ -494,7 +497,9 @@ def main():
         print("\n[1/3] 初始化诊断引擎...")
         skill = USStockAdvancedSkill(
             polygon_api_key=POLYGON_API_KEY,
-            llm_api_key=LLM_API_KEY
+            llm_api_key=LLM_API_KEY,
+            llm_base_url=LLM_BASE_URL,
+            llm_model=LLM_MODEL
         )
 
         print("[2/3] 执行多维度诊断（技术面 + 新闻 + X观点）...")

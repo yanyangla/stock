@@ -23,6 +23,8 @@ jobs:
     env:
       POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
       LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+      LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
+      LLM_MODEL: ${{ secrets.LLM_MODEL }}
       SENDER_EMAIL: ${{ secrets.SENDER_EMAIL }}
       EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
 
