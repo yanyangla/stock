@@ -206,6 +206,12 @@ class USStockAdvancedSkill:
         # MACD
         df['MACD'], df['MACD_signal'], df['MACD_hist'] = talib.MACD(df['Close'])
 
+        # 布林带
+        df['BB_upper'], df['BB_middle'], df['BB_lower'] = talib.BBANDS(df['Close'], timeperiod=20)
+
+        # ATR (波动率)
+        df['ATR'] = talib.ATR(df['High'], df['Low'], df['Close'], timeperiod=14)
+
         return df
 
     def _fetch_pure_news(self, ticker: str) -> List[Dict[str, str]]:
@@ -256,10 +262,12 @@ class USStockAdvancedSkill:
 
         return x_database.get(ticker, "【Leopold & Shay】: 近期在 X 上未对此 Ticker 发表定向高权重产业观点。")
 
-    def _judge_trading_structure(self, df: pd.DataFrame) -> Dict[str, Any]:
-        """判断交易结构（四线多头排列、回踩、突破等）"""
+    def _judge_trading_structure(self, df: pd.DataFrame, ticker: str) -> Dict[str, Any]:
+        """判断交易结构（四线多头排列、回踩、突破等）- TradingView 风格"""
         today = df.iloc[-1]
         yesterday = df.iloc[-2]
+        week_ago = df.iloc[-6] if len(df) > 5 else df.iloc[0]
+        month_ago = df.iloc[-22] if len(df) > 21 else df.iloc[0]
 
         # 四线多头排列判断
         is_bullish_alignment = (
@@ -274,6 +282,7 @@ class USStockAdvancedSkill:
 
         # 突破判断（近 22 日新高）
         is_breakout = today['Close'] > max(df['Close'].iloc[-22:-1])
+        is_52w_high = today['Close'] >= max(df['Close'].iloc[-252:]) if len(df) > 251 else False
 
         # RSI 判断
         rsi_status = "中性"
@@ -281,6 +290,35 @@ class USStockAdvancedSkill:
             rsi_status = "⚠️ 超买区间"
         elif today['RSI'] < 30:
             rsi_status = "📉 超卖区间"
+
+        # MACD 判断
+        macd_signal = "中性"
+        if today['MACD'] > today['MACD_signal'] and today['MACD_hist'] > 0:
+            macd_signal = "📈 金叉/多头"
+        elif today['MACD'] < today['MACD_signal'] and today['MACD_hist'] < 0:
+            macd_signal = "📉 死叉/空头"
+
+        # 布林带位置
+        bb_position = "中轨"
+        if today['Close'] > today['BB_upper']:
+            bb_position = "突破上轨"
+        elif today['Close'] < today['BB_lower']:
+            bb_position = "跌破下轨"
+        elif today['Close'] > today['BB_middle']:
+            bb_position = "上轨区域"
+        else:
+            bb_position = "下轨区域"
+
+        # 价格变化
+        day_change = ((today['Close'] - yesterday['Close']) / yesterday['Close']) * 100
+        week_change = ((today['Close'] - week_ago['Close']) / week_ago['Close']) * 100
+        month_change = ((today['Close'] - month_ago['Close']) / month_ago['Close']) * 100
+
+        # 均线距离
+        ma5_dist = ((today['Close'] - today['MA5']) / today['MA5']) * 100
+        ma10_dist = ((today['Close'] - today['MA10']) / today['MA10']) * 100
+        ma50_dist = ((today['Close'] - today['MA50']) / today['MA50']) * 100
+        ma200_dist = ((today['Close'] - today['MA200']) / today['MA200']) * 100 if not pd.isna(today['MA200']) else 0
 
         # 交易结构判定
         if is_bullish_alignment:
@@ -296,21 +334,49 @@ class USStockAdvancedSkill:
             else:
                 side = "⏸️ **中性观望区间 - 均线系统交织纠缠，暂无清晰量价结构**"
 
+        # TradingView 链接
+        tradingview_url = f"https://www.tradingview.com/chart/?symbol=NASDAQ%3A{ticker}"
+
         return {
             "side": side,
-            "current_price": f"${today['Close']:.2f}",
-            "ma_status": f"MA5: ${today['MA5']:.2f} | MA10: ${today['MA10']:.2f} | MA20: ${today['MA20']:.2f} | MA50: ${today['MA50']:.2f}",
-            "volume_status": f"今日量能 {'**良性缩量**' if is_volume_shrinking else ('**放量动能**' if is_volume_exploding else '正常')}，当前相对量比为 {today['Volume']/today['Vol_MA20']:.2f}x",
-            "rsi_status": f"RSI(14): {today['RSI']:.1f} - {rsi_status}",
-            "support_1": f"10日均线位 ${today['MA10']:.2f}",
-            "support_2": f"50日均线/中期核心防御闸 ${today['MA50']:.2f}",
-            "resistance": f"前高压力位 ${max(df['Close'].iloc[-22:]):.2f}"
+            "current_price": today['Close'],
+            "day_change": day_change,
+            "week_change": week_change,
+            "month_change": month_change,
+            "volume": today['Volume'],
+            "volume_ratio": today['Volume'] / today['Vol_MA20'],
+            "ma_table": {
+                "MA5": {"price": today['MA5'], "distance": ma5_dist},
+                "MA10": {"price": today['MA10'], "distance": ma10_dist},
+                "MA20": {"price": today['MA20'], "distance": 0},
+                "MA50": {"price": today['MA50'], "distance": ma50_dist},
+                "MA200": {"price": today['MA200'] if not pd.isna(today['MA200']) else 0, "distance": ma200_dist}
+            },
+            "rsi": today['RSI'],
+            "rsi_status": rsi_status,
+            "macd_signal": macd_signal,
+            "bb_position": bb_position,
+            "atr": today['ATR'],
+            "is_52w_high": is_52w_high,
+            "support_1": today['MA10'],
+            "support_2": today['MA50'],
+            "resistance": max(df['Close'].iloc[-22:]),
+            "tradingview_url": tradingview_url
         }
 
     def _generate_ai_report(self, ticker: str, risk_status: str, tech_res: Dict, news_res: List, x_insights: str) -> str:
         """使用 LLM 生成深度诊断报告"""
 
         news_text = "\n".join([f"- [{n['title']}]({n['url']}) ({n['source']})" for n in news_res]) if news_res else "无重大新闻"
+
+        # 格式化均线表格
+        ma_table_str = ""
+        for ma_name, ma_data in tech_res['ma_table'].items():
+            price = ma_data['price']
+            dist = ma_data['distance']
+            if price > 0:
+                color = "🟢" if dist > 0 else "🔴" if dist < 0 else "⚪"
+                ma_table_str += f"| {ma_name} | ${price:.2f} | {color} {dist:+.1f}% |\n"
 
         prompt = f"""你是一位精通威科夫量价理论、趋势交易，且深度跟踪美股 AI 产业的核心策略师。
 请对股票 **{ticker}** 进行每日深度结构诊断，输出结构化、可操作的交易建议。
@@ -319,14 +385,34 @@ class USStockAdvancedSkill:
 ### 1. 风控状态
 {risk_status}
 
-### 2. 技术面结构
-- 交易信号: {tech_res['side']}
-- 当前价格: {tech_res['current_price']}
-- 均线系统: {tech_res['ma_status']}
-- 量能状态: {tech_res['volume_status']}
-- RSI 指标: {tech_res['rsi_status']}
-- 核心支撑: {tech_res['support_1']} / {tech_res['support_2']}
-- 压力位: {tech_res['resistance']}
+### 2. TradingView 技术面数据
+- **当前价格**: ${tech_res['current_price']:.2f}
+- **日涨跌**: {tech_res['day_change']:+.2f}%
+- **周涨跌**: {tech_res['week_change']:+.2f}%
+- **月涨跌**: {tech_res['month_change']:+.2f}%
+- **成交量**: {tech_res['volume']:,.0f}
+- **量比**: {tech_res['volume_ratio']:.2f}x
+
+#### 均线系统
+| 均线 | 价格 | 距离 |
+|------|------|------|
+{ma_table_str}
+
+#### 技术指标
+- **RSI(14)**: {tech_res['rsi']:.1f} - {tech_res['rsi_status']}
+- **MACD**: {tech_res['macd_signal']}
+- **布林带位置**: {tech_res['bb_position']}
+- **ATR(14)**: ${tech_res['atr']:.2f}
+
+#### 关键价位
+- **交易信号**: {tech_res['side']}
+- **核心支撑1**: ${tech_res['support_1']:.2f} (MA10)
+- **核心支撑2**: ${tech_res['support_2']:.2f} (MA50)
+- **前高压力**: ${tech_res['resistance']:.2f}
+- **52周新高**: {'✅ 是' if tech_res['is_52w_high'] else '❌ 否'}
+
+#### TradingView 图表
+{tech_res['tradingview_url']}
 
 ### 3. 源头新闻
 {news_text}
@@ -338,13 +424,19 @@ class USStockAdvancedSkill:
 请按以下 Markdown 格式输出（不要省略任何部分）：
 
 ### 📊 [{ticker}] 技术面结构诊断
-（一段话总结当前技术状态，明确趋势方向与量价配合情况）
+（一段话总结当前技术状态，明确趋势方向与量价配合情况，参考 TradingView 走势风格）
+
+### 📈 价格与成交量分析
+（分析日线/周线/月线涨跌，成交量变化，量价配合情况）
+
+### 📉 均线与指标分析
+（分析均线排列状态，RSI/MACD/布林带等技术指标信号）
 
 ### 📰 核心新闻驱动
 （列出 2-3 条关键新闻及其对股价的影响判断）
 
 ### 🎯 交易策略建议
-（明确的买入/持有/卖出建议，包含具体触发条件和止损位）
+（明确的买入/持有/卖出建议，包含具体触发条件、入场价位和止损位）
 
 ### ⚠️ 风险警示
 （当前最大的 2-3 个风险点）
@@ -358,7 +450,7 @@ class USStockAdvancedSkill:
                 model=self.llm_model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.1,
-                max_tokens=1200
+                max_tokens=1500
             )
             return response.choices[0].message.content
         except Exception as e:
@@ -382,7 +474,7 @@ class USStockAdvancedSkill:
 
                 risk_status = self._check_market_and_post_market(ticker)
                 df = self._fetch_technical_data(ticker)
-                tech_res = self._judge_trading_structure(df)
+                tech_res = self._judge_trading_structure(df, ticker)
                 news_res = self._fetch_pure_news(ticker)
                 x_insights = self._fetch_x_influencer_insights(ticker)
 
