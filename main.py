@@ -431,8 +431,16 @@ def send_email_report(
         html_part = MIMEText(html_content, 'html', 'utf-8')
         message.attach(html_part)
 
-        # 连接 Gmail SMTP 服务器（SSL 加密）
-        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
+        # 根据发件邮箱选择 SMTP 服务器
+        if '163.com' in sender_email:
+            smtp_server = 'smtp.163.com'
+        elif 'qq.com' in sender_email:
+            smtp_server = 'smtp.qq.com'
+        else:
+            smtp_server = 'smtp.gmail.com'
+
+        # 连接 SMTP 服务器（SSL 加密）
+        with smtplib.SMTP_SSL(smtp_server, 465) as server:
             server.login(sender_email, sender_password)
             server.sendmail(sender_email, recipient_email, message.as_string())
 
