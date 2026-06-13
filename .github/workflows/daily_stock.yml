@@ -1,0 +1,149 @@
+# ============================================================
+# 美股自选股每日深度复盘自动化工作流
+# 触发时间：美东时间 16:30（美股收盘后半小时）
+# 运行环境：ubuntu-latest (GitHub 免费 Runner)
+# ============================================================
+
+name: US Stock Daily Analysis
+
+on:
+  # 定时触发：每周一至周五 UTC 21:30 执行
+  # 对应美东时间：夏令时 17:30 / 非夏令时 16:30
+  schedule:
+    - cron: '30 21 * * 1-5'
+
+  # 允许手动触发（用于测试）
+  workflow_dispatch:
+
+jobs:
+  generate-and-send-report:
+    runs-on: ubuntu-latest
+
+    # 设置环境变量（从 GitHub Secrets 读取）
+    env:
+      POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+      SENDER_EMAIL: ${{ secrets.SENDER_EMAIL }}
+      EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+
+    steps:
+      # ========================
+      # 步骤 1：检出代码
+      # ========================
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      # ========================
+      # 步骤 2：安装系统依赖
+      # ========================
+      - name: 🔧 Install system dependencies
+        run: |
+          echo "正在安装系统编译工具..."
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            wget \
+            tar \
+            libtool \
+            autoconf \
+            automake \
+            pkg-config
+
+      # ========================
+      # 步骤 3：编译安装 TA-Lib C 语言底层库
+      # 重要：这是 Python ta-lib 包的依赖，必须先编译安装！
+      # ========================
+      - name: 📚 Compile and install TA-Lib C library
+        run: |
+          echo "================================================"
+          echo "开始编译安装 TA-Lib C 语言底层库..."
+          echo "================================================"
+
+          # 下载 TA-Lib 源码（版本 0.4.0）
+          cd /tmp
+          wget -q http://prdownloads.sourceforge.net/ta-lib/ta-lib-0.4.0-src.tar.gz
+
+          # 解压
+          tar -xzf ta-lib-0.4.0-src.tar.gz
+          cd ta-lib
+
+          # 配置编译选项
+          ./configure --prefix=/usr
+
+          # 编译（使用 4 核并行加速）
+          make -j4
+
+          # 安装到系统目录
+          sudo make install
+
+          # 更新动态链接库缓存
+          sudo ldconfig
+
+          echo "✅ TA-Lib C 库编译安装完成！"
+
+      # ========================
+      # 步骤 4：设置 Python 环境
+      # ========================
+      - name: 🐍 Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      # ========================
+      # 步骤 5：安装 Python 依赖
+      # ========================
+      - name: 📦 Install Python dependencies
+        run: |
+          echo "正在安装 Python 依赖包..."
+
+          # 创建 requirements.txt（如果不存在）
+          cat > requirements.txt << 'EOF'
+          requests>=2.31.0
+          pandas>=2.0.0
+          TA-Lib>=0.4.28
+          openai>=1.30.0
+          numpy>=1.24.0
+          EOF
+
+          # 安装依赖
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+          echo "✅ Python 依赖安装完成！"
+
+      # ========================
+      # 步骤 6：运行主程序
+      # ========================
+      - name: 🚀 Run daily stock analysis
+        run: |
+          echo "================================================"
+          echo "开始执行美股自选股每日深度复盘..."
+          echo "时间: $(date '+%Y-%m-%d %H:%M:%S UTC')"
+          echo "================================================"
+
+          # 执行主脚本
+          python main.py
+
+          echo "================================================"
+          echo "✅ 任务执行完成！"
+          echo "================================================"
+
+      # ========================
+      # 步骤 7：失败通知（可选）
+      # ========================
+      - name: 🚨 Notify on failure
+        if: failure()
+        run: |
+          echo "❌ 工作流执行失败！请检查日志。"
+          echo "失败时间: $(date '+%Y-%m-%d %H:%M:%S UTC')"
+
+      # ========================
+      # 步骤 8：清理临时文件
+      # ========================
+      - name: 🧹 Cleanup temporary files
+        if: always()
+        run: |
+          echo "清理临时文件..."
+          rm -rf /tmp/ta-lib*
+          echo "✅ 清理完成"
