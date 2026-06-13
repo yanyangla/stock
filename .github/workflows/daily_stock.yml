@@ -72,8 +72,8 @@ jobs:
           # 配置编译选项
           ./configure --prefix=/usr
 
-          # 编译（使用 4 核并行加速）
-          make -j4
+          # 编译（单线程编译，避免并行编译的竞争条件）
+          make
 
           # 安装到系统目录
           sudo make install
