@@ -7,10 +7,11 @@
 name: US Stock Daily Analysis
 
 on:
+  # ⏸️ 已暂停 - 定时触发已注释
   # 定时触发：每周一至周五 UTC 21:30 执行
   # 对应美东时间：夏令时 17:30 / 非夏令时 16:30
-  schedule:
-    - cron: '30 21 * * 1-5'
+  # schedule:
+  #   - cron: '30 21 * * 1-5'
 
   # 允许手动触发（用于测试）
   workflow_dispatch:
